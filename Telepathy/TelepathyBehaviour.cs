@@ -6,6 +6,7 @@ using TaleWorlds.Library;
 using TaleWorlds.Localization;
 using Helpers;
 using HarmonyLib;
+using Common;
 
 namespace Telepathy
 {
@@ -17,7 +18,13 @@ namespace Telepathy
 			{
 				Hero = hero;
 				Ready = false;
+				numHoursElapsed = 0;
 			}
+
+			//If hourly tick is beyond this just remove the call.
+			public const int MAX_HOURS_ELAPSED = 10;
+
+			public int numHoursElapsed { get; set; }
 
 			public abstract void HourlyTick();
 			
@@ -201,15 +208,37 @@ namespace Telepathy
 				return;
 			}
 			var call = calls.FirstOrDefault(x => x.Ready);
-			if (call != null && call.Hero.CanTalkTo())
-			{
+			if (call != null && call.Hero.CanTalkTo()) {
 				calls.Remove(call);
-				if (call.Hero.IsOccupiedByAnEvent())
-				{
-					calls.AddLast(call);
+
+				call.numHoursElapsed++;
+				var defenderParty = call.Hero?.PartyBelongedTo?.Party;
+				var attackerParty = Hero.MainHero?.PartyBelongedTo?.Party;
+				bool isPartySetupValid = defenderParty != null && attackerParty != null;
+				if (isPartySetupValid) {
+					MobileParty mobileParty = (defenderParty.IsMobile &&
+					defenderParty != PartyBase.MainParty &&
+					defenderParty.MobileParty != MobileParty.MainParty.AttachedTo) ?
+					defenderParty.MobileParty :
+					((attackerParty.IsMobile && attackerParty != PartyBase.MainParty &&
+					attackerParty.MobileParty != MobileParty.MainParty.AttachedTo) ?
+					attackerParty.MobileParty : null);
+
+					isPartySetupValid = mobileParty != null || defenderParty.IsSettlement || attackerParty.IsSettlement;
 				}
-				else
-				{
+
+				if (call.Hero.IsOccupiedByAnEvent() || !isPartySetupValid) {
+					if (call.numHoursElapsed > Call.MAX_HOURS_ELAPSED) {
+						if (call.Hero != null) {
+							TextObject to = new TextObject("{HeroName} cannot be reached after " + Call.MAX_HOURS_ELAPSED
+							+ " hours. Giving up...");
+							to.SetTextVariable("HeroName", call.Hero.Name);
+							GameLog.Info(to.ToString());
+						}
+					} else {
+						calls.AddLast(call);
+					}
+				} else {
 					StartMeeting(call.Hero);
 				}
 			}
